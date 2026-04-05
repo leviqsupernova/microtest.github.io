@@ -321,7 +321,7 @@ function startCamera(mode) {
       currentStream = s;
       document.getElementById('video').srcObject = s;
       document.getElementById('video-wrap').style.display = 'block';
-      document.getElementById('cam-label').textContent = mode==='user' ? '● SELFIE' : '● LIVE';
+      document.getElementById('cam-label').textContent = mode==='user';
     }).catch(function(e){ alert('Camera error: '+e.message); });
 }
 function stopCamera() {
