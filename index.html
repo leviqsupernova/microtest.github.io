@@ -351,37 +351,49 @@ setRow('js', true, 'PASS');
   setRow('cookie', ok, ok ? 'PASS' : 'BLOCKED');
 })();
 
-/* ─── 3rd-party cookies — embeddable external checker ─── */
-(function(){
-  var done = false;
-  var helperOrigin = 'https://raw.githubusercontent.com';
-  var helperUrl = 'https://raw.githubusercontent.com/googleads/webview-ads-3rd-party-cookie-checker/main/test/index.html';
+/* ─── 3rd-party cookies (reliable test using httpbin.org) ─── */
+(async function() {
+  const row = document.getElementById('row-3p');
+  const statusSpan = document.getElementById('st-3p');
+  row.className = 'check-row running';
+  statusSpan.textContent = 'CHECKING...';
 
-  function finish(ok, label) {
-    if (done) return;
-    done = true;
-    setRow('3p', ok, label);
-    window.removeEventListener('message', onMessage, false);
-    if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+  try {
+    // 1. Try to set a third-party cookie via httpbin.org
+    const setRes = await fetch('https://httpbin.org/cookies/set?3pcTest=hello', {
+      method: 'GET',
+      credentials: 'include',
+      mode: 'cors',
+    });
+    if (!setRes.ok) throw new Error('Failed to set cookie');
+
+    // 2. Retrieve all cookies from httpbin.org and check for our test cookie
+    const getRes = await fetch('https://httpbin.org/cookies', {
+      method: 'GET',
+      credentials: 'include',
+      mode: 'cors',
+    });
+    const data = await getRes.json();
+    const ok = data.cookies && data.cookies['3pcTest'] === 'hello';
+
+    // Clean up: delete the test cookie
+    await fetch('https://httpbin.org/cookies/delete?3pcTest', {
+      method: 'GET',
+      credentials: 'include',
+    }).catch(() => {});
+
+    if (ok) {
+      row.className = 'check-row pass';
+      statusSpan.textContent = 'PASS';
+    } else {
+      row.className = 'check-row fail';
+      statusSpan.textContent = 'BLOCKED';
+    }
+  } catch (err) {
+    row.className = 'check-row fail';
+    statusSpan.textContent = 'BLOCKED or UNKNOWN';
+    console.warn('3rd-party cookie test error:', err);
   }
-
-  function onMessage(e) {
-    if (!e || !e.origin || e.origin !== helperOrigin) return;
-    if (e.data === '3PCsupported') finish(true, 'PASS');
-    else if (e.data === '3PCunsupported') finish(false, 'BLOCKED');
-  }
-
-  var iframe = document.createElement('iframe');
-  iframe.style.display = 'none';
-  iframe.referrerPolicy = 'no-referrer';
-  iframe.src = helperUrl;
-
-  window.addEventListener('message', onMessage, false);
-  document.body.appendChild(iframe);
-
-  setTimeout(function() {
-    finish(false, 'BLOCKED or UNKNOWN');
-  }, 6000);
 })();
 
 /* ─── camera ─── */
