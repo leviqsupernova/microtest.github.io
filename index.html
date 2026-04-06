@@ -244,10 +244,76 @@
 <br>
 
 <script>
-(function(){
-  var m = /Chrome\/(\d+)/.exec(navigator.userAgent);
-  document.getElementById('ua-short').textContent =
-    m ? 'Chrome ' + m[1] : navigator.userAgent.slice(0, 44);
+(async function(){
+  var name = 'Unknown';
+  var ver = '';
+  var engine = '';
+  var os = '';
+  var ua = navigator.userAgent;
+  var m;
+
+  if (navigator.userAgentData && navigator.userAgentData.brands) {
+    var brands = navigator.userAgentData.brands.map(function(b){ return b.brand; });
+    if (brands.indexOf('Microsoft Edge') !== -1) {
+      name = 'Edge';
+    } else if (brands.indexOf('Google Chrome') !== -1) {
+      name = 'Chrome';
+    } else if (brands.indexOf('Opera') !== -1) {
+      name = 'Opera';
+    } else {
+      name = brands[0] || 'Unknown';
+    }
+
+    engine = 'Blink';
+
+    try {
+      var hi = await navigator.userAgentData.getHighEntropyValues(['platform', 'platformVersion', 'uaFullVersion']);
+      os = hi.platform || '';
+      ver = hi.uaFullVersion || '';
+      if (os && hi.platformVersion) {
+        os = os + ' ' + hi.platformVersion;
+      }
+    } catch (e) {}
+  } else {
+    if ((m = /Edg\/(\d+)/.exec(ua))) {
+      name = 'Edge'; ver = m[1];
+    } else if ((m = /OPR\/(\d+)/.exec(ua))) {
+      name = 'Opera'; ver = m[1];
+    } else if ((m = /Firefox\/(\d+)/.exec(ua))) {
+      name = 'Firefox'; ver = m[1];
+    } else if ((m = /Chrome\/(\d+)/.exec(ua))) {
+      name = 'Chrome'; ver = m[1];
+    } else if (/Safari/.test(ua) && (m = /Version\/(\d+)/.exec(ua))) {
+      name = 'Safari'; ver = m[1];
+    }
+
+    if (name === 'Firefox') {
+      engine = 'Gecko';
+    } else if (name === 'Safari') {
+      engine = 'WebKit';
+    } else {
+      engine = 'Blink';
+    }
+
+    var ntMap = {'10.0':'10/11','6.3':'8.1','6.2':'8','6.1':'7','6.0':'Vista','5.1':'XP'};
+    if ((m = /Windows NT ([\d.]+)/.exec(ua))) {
+      os = 'Windows ' + (ntMap[m[1]] || m[1]);
+    } else if ((m = /Mac OS X ([\d_]+)/.exec(ua))) {
+      os = 'macOS ' + m[1].replace(/_/g, '.');
+    } else if ((m = /Android ([\d.]+)/.exec(ua))) {
+      os = 'Android ' + m[1];
+    } else if ((m = /iPhone OS ([\d_]+)/.exec(ua))) {
+      os = 'iOS ' + m[1].replace(/_/g, '.');
+    } else if ((m = /iPad; CPU OS ([\d_]+)/.exec(ua))) {
+      os = 'iPadOS ' + m[1].replace(/_/g, '.');
+    } else if (/Linux/.test(ua)) {
+      os = 'Linux';
+    }
+  }
+
+  var parts = [name + (ver ? ' ' + ver : ''), engine];
+  if (os) parts.push(os);
+  document.getElementById('ua-short').textContent = parts.join(' · ');
 })();
 
 function setRow(id, pass, label) {
@@ -258,47 +324,65 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+/* ─── HTTP (mixed-content) ─── */
+fetch('http://neverssl.com/', {
+  method:'HEAD',
+  mode:'no-cors',
+  cache:'no-store',
+  signal: AbortSignal.timeout(6000)
+})
+  .then(function(){ setRow('http', true, 'ALLOWED'); })
+  .catch(function(err){
+    var m = (err && err.message) || '';
+    setRow('http', false,
+      /mixed|insecure|blocked|Failed/i.test(m) ? 'BLOCKED' : 'UNREACHABLE');
+  });
+
 setRow('js', true, 'PASS');
 
 (function(){
-  if (!navigator.cookieEnabled) { setRow('cookie', false, 'DISABLED'); return; }
+  if (!navigator.cookieEnabled) {
+    setRow('cookie', false, 'DISABLED');
+    return;
+  }
   document.cookie = 'diag1p=1; SameSite=Lax; path=/';
-  var ok = document.cookie.includes('diag1p');
+  var ok = document.cookie.split('; ').some(function(part) { return part.indexOf('diag1p=') === 0; });
+  document.cookie = 'diag1p=; Max-Age=0; path=/';
   setRow('cookie', ok, ok ? 'PASS' : 'BLOCKED');
 })();
 
-/* ─── 3rd-party cookies — uses Storage Access API (authoritative) ─── */
+/* ─── 3rd-party cookies — embeddable external checker ─── */
 (function(){
-  if (typeof document.hasStorageAccess === 'function') {
-    document.hasStorageAccess().then(function(hasAccess) {
-      if (hasAccess) {
-        document.cookie = 'diag3p=1; SameSite=None; Secure; path=/';
-        var ok = document.cookie.includes('diag3p');
-        setRow('3p', ok, ok ? 'PASS' : 'BLOCKED');
-      } else {
-        setRow('3p', false, 'BLOCKED');
-      }
-    }).catch(function() {
-      document.cookie = 'diag3p=1; SameSite=None; Secure; path=/';
-      var ok = document.cookie.includes('diag3p');
-      setRow('3p', ok, ok ? 'PASS' : 'BLOCKED');
-    });
-  } else {
-    document.cookie = 'diag3p=1; SameSite=None; Secure; path=/';
-    var ok = document.cookie.includes('diag3p');
-    setRow('3p', ok, ok ? 'PASS' : 'BLOCKED');
-  }
-})();
+  var done = false;
+  var helperOrigin = 'https://raw.githubusercontent.com';
+  var helperUrl = 'https://raw.githubusercontent.com/googleads/webview-ads-3rd-party-cookie-checker/main/test/index.html';
 
-/* ─── HTTP (mixed-content) ─── */
-fetch('http://neverssl.com/', {method:'HEAD', mode:'no-cors',
-  cache:'no-store', signal:AbortSignal.timeout(6000)})
-  .then(function(){ setRow('http', true, 'ALLOWED'); })
-  .catch(function(err){
-    var m = (err.message||'');
-    setRow('http', false,
-      /mixed|insecure|blocked|Failed/i.test(m) ? 'BLOCKED (normal)' : 'UNREACHABLE');
-  });
+  function finish(ok, label) {
+    if (done) return;
+    done = true;
+    setRow('3p', ok, label);
+    window.removeEventListener('message', onMessage, false);
+    if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+  }
+
+  function onMessage(e) {
+    if (!e || !e.origin || e.origin !== helperOrigin) return;
+    if (e.data === '3PCsupported') finish(true, 'PASS');
+    else if (e.data === '3PCunsupported') finish(false, 'BLOCKED');
+  }
+
+  var iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  iframe.referrerPolicy = 'no-referrer';
+  iframe.src = helperUrl;
+
+  window.addEventListener('message', onMessage, false);
+  document.body.appendChild(iframe);
+
+  setTimeout(function() {
+    finish(false, 'BLOCKED or UNKNOWN');
+  }, 6000);
+})();
 
 /* ─── camera ─── */
 var currentStream = null;
@@ -479,6 +563,7 @@ function triggerGoogleOAuth() {
   setGSpinner(true, 'Waiting for account selection\u2026');
   msgH = function(e) {
     if (!e.data || !e.data.__mockOauth) return;
+    if (oauthPopup && e.source !== oauthPopup) return;
     cleanupOAuth(); setGSpinner(false); setGBtn(false);
     showOAuthResult(e.data);
   };
